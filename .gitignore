@@ -1,0 +1,21 @@
+__pycache__/
+src/HallOfFame/
+plots/
+backup/
+
+# Ignore subdirectories other than raw/
+data/BAMultiShapesDataset/*
+!data/BAMultiShapesDataset/raw/
+!data/BAMultiShapesDataset/raw/*
+
+data/MUTAG/*
+!data/MUTAG/raw/
+!data/MUTAG/raw/*
+
+data/Mutagenicity/*
+!data/Mutagenicity/raw/
+!data/Mutagenicity/raw/*
+
+data/NCI1/*
+!data/NCI1/raw/
+!data/NCI1/raw/*
