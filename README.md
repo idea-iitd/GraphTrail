@@ -12,23 +12,26 @@ In case you have some issues with the above command, use the following instead:
 ```bash
 cd src/
 
-conda create -n GraphTrail
+conda create -n GraphTrail -y
 conda activate GraphTrail
-conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 cpuonly -c pytorch
-conda install pyg -c pyg
-conda install -c conda-forge shap
-conda install networkx matplotlib seaborn ipykernel ipywidgets
+conda clean -a -y
+
+conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 cpuonly -c pytorch -y
+conda install pyg -c pyg -y
+conda install -c conda-forge shap multiprocess -y
+conda install networkx matplotlib seaborn ipykernel ipywidgets -y
+
+pip cache purge
 pip install pysr
-conda install conda-forge::boost
-conda install gxx_linux-64
+
+conda install conda-forge::boost -y
+conda install gxx_linux-64 -y
 
 # if files and folder are present
 rm -r pygcanl/build/
 rm -r pygcanl.egg-info/
 rm pygcanl/*.so
 pip install -e pygcanl
-
-conda install -c conda-forge multiprocess
 ```
 
 # Run the code
