@@ -16,10 +16,9 @@ class PySrModelBoolean:
         model3 = PySRRegressor(
             binary_operators=["Or(x, y) = ((x > zero(x)) | (y > zero(y))) * one(x)",
                               "And(x, y) = ((x > zero(x)) & (y > zero(y))) * one(x)",
-                              "Xor(x,y)  = ((x > zero(x)) ^ (y > zero(y))) * one(x)"],
+                              "Xor(x, y) = (((x > 0) & (y <= 0)) | ((x <= 0) & (y > 0))) * 1f0"],
             unary_operators=["Not(x) = ~(x> zero(x)) * one(x)"],
 
-            # loss="loss(prediction, target) = abs(round(prediction) - target)",
             loss="loss(prediction, target) = sum(prediction != target)",
 
             extra_sympy_mappings={"Or": lambda x, y: sympy.Piecewise((1.0, (x > 0) | (y > 0)), (0.0, True)),
