@@ -1,6 +1,6 @@
 """Compute the Shapley values of the computation trees identified in gen_ctree.py"""
-from argparse import ArgumentParser
 import multiprocess as mp
+from argparse import ArgumentParser
 from pickle import load, dump
 
 import numpy as np
@@ -10,26 +10,27 @@ import torch
 import gnn
 
 parser = ArgumentParser(description='Process some parameters.')
-parser.add_argument('--name', type=str,
-                    help='Name parameter', required=True)
+parser.add_argument('--name', type=str, required=True,
+                    help='Dataset name (case-sensitive) as passed to pyg',
+                    choices=["BAMultiShapesDataset", "MUTAG", "Mutagenicity", "NCI1"],)
 parser.add_argument('--arch', type=str,
                     choices=['GCN', 'GIN', 'GAT'], help='GNN model architecutre', required=True)
-parser.add_argument('--pool', type=str, default='add',
-                    help='Model parameter')
+parser.add_argument('--pool', type=str, default='add', choices=['add', 'mean', 'max'],
+                    help='Graph pooling layer.')
 parser.add_argument('--size', type=float, default=1.0,
-                    help='Size parameter')
+                    help='Fraction of training data to be used.')
 parser.add_argument('--seed', type=int, default=45,
-                    help='Seed parameter')
-parser.add_argument('--procs', type=int, default=8, help='Number of processes to run in parallel.')
+                    help='Seed used for train-val-test split.')
+parser.add_argument('--procs', type=int, default=1, help='Number of processes to run in parallel.')
 args = parser.parse_args()
 
 FOLDER = f"../data/{args.name}/{args.arch}/{args.pool}/{args.size}/{args.seed}/"
 
-with open(f"{FOLDER}/ctrees_embeddings.pkl", "rb") as file:
+with open(f"{FOLDER}/ctree_embeddings.pkl", "rb") as file:
     ctree_embeddings = load(file)
 
-with open(f"{FOLDER}/shap_ind_vec.pkl", "rb") as file:
-    cnt_ind_vec_shap = load(file)
+with open(f"{FOLDER}/cnt_ind_vec.pkl", "rb") as file:
+    cnt_ind_vec = load(file)
 
 model = eval(f"gnn.{args.arch.upper()}_{args.name}(pooling='{args.pool}')")
 model.eval()
@@ -67,37 +68,43 @@ def f(ind_vectors):
     return out.numpy()
 
 
-def calculate_shap(shap_arr):
+def calculate_shap(shap_arr, chunk_num):
     z = np.zeros((1, shap_arr[0].shape[0]))
     explainer = shap.KernelExplainer(f, z)
-    shap_values = explainer.shap_values(X=shap_arr, gc_collect=True)
+    shap_values = explainer.shap_values(X=shap_arr, gc_collect=True, silent=True)
+    print(f"Chunk {chunk_num} done!")
     return shap_values
 
 
-def main():
-    import os
-    if os.path.exists(f"{FOLDER}/shap_values.pkl"):
-        print("Shap compuation already done")
-        exit(0)
-    chunk_size = len(cnt_ind_vec_shap) // args.procs
-    remainder = len(cnt_ind_vec_shap) % args.procs
+args.procs = min(args.procs, len(cnt_ind_vec))
+chunk_size = len(cnt_ind_vec) // args.procs
+remainder  = len(cnt_ind_vec) %  args.procs
 
-    if remainder:
-        chunks = [cnt_ind_vec_shap[i *
-                                   chunk_size: (i + 1) * chunk_size] for i in range(args.procs-1)]
-        chunks.append(cnt_ind_vec_shap[(args.procs-1) * chunk_size:])
-    else:
-        chunks = [cnt_ind_vec_shap[i *
-                                   chunk_size: (i + 1) * chunk_size] for i in range(args.procs)]
+# Doesn't contain zero and len(cnt_ind_vec)
+chunks = [chunk_size for __ in range(args.procs)]
 
-    with mp.Pool(args.procs) as p:
-        results = p.map(calculate_shap, chunks)
+# Distribute the remainder
+for j in range(remainder):
+    chunks[j] += 1
 
-    shap_values = np.concatenate(results, axis=0)
+# Take the cumulative sum to get the indices.
+indices = [0] + np.cumsum(chunks).tolist()
 
-    with open(f"{FOLDER}/shap_values.pkl", "wb") as file:
-        dump(shap_values, file)
+# Divide the indicator vectors into chunks.
+chunked_ind_vectors = []
+for i in range(len(indices) - 1):
+    idx_start = indices[i]
+    idx_end = indices[i + 1]
+    chunked_ind_vectors.append(cnt_ind_vec[idx_start: idx_end])
 
+print("Chunk size:", chunks)
+print("#Chunks:", len(chunked_ind_vectors))
+print()
 
-if __name__ == '__main__':
-    main()
+with mp.Pool(args.procs) as p:
+    results = p.starmap(calculate_shap, zip(chunked_ind_vectors, range(len(chunked_ind_vectors))))
+
+shap_values = np.concatenate(results, axis=0)
+
+with open(f"{FOLDER}/shap_values.pkl", "wb") as file:
+    dump(shap_values, file)

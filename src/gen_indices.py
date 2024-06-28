@@ -58,7 +58,7 @@ for name in ["BAMultiShapesDataset", "MUTAG", "Mutagenicity", "NCI1"]:
                     FOLDER = f"../data/{name}/{arch}/{pool}/{size}/{seed}/"
                     makedirs(FOLDER, exist_ok=True)
                     with open(f"{FOLDER}/train_indices.pkl", "wb") as file:
-                        dump(train_indices, file)
+                        dump(train_indices_small, file)
                     with open(f"{FOLDER}/test_indices.pkl", "wb") as file:
                         dump(test_indices, file)
                     with open(f"{FOLDER}/val_indices.pkl", "wb") as file:

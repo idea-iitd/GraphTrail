@@ -11,13 +11,17 @@ import gnn
 
 
 parser = ArgumentParser(description='Process some parameters.')
-parser.add_argument('--name', type=str, default="MUTAG",
-                    help='Name parameter of pyg dataset', required=True)
+parser.add_argument('--name', type=str, required=True,
+                    help='Dataset name (case-sensitive) as passed to pyg',
+                    choices=["BAMultiShapesDataset", "MUTAG", "Mutagenicity", "NCI1"],)
 parser.add_argument('--arch', type=str,
                     choices=['GCN', 'GIN', 'GAT'], help='GNN model architecutre', required=True)
-parser.add_argument('--pool', type=str, default='add', help='Model parameter')
-parser.add_argument('--size', type=float, default=1.0, help='Size parameter')
-parser.add_argument('--seed', type=int, default=45, help='Seed parameter')
+parser.add_argument('--pool', type=str, default='add', choices=['add', 'mean', 'max'],
+                    help='Graph pooling layer.')
+parser.add_argument('--size', type=float, default=1.0,
+                    help='Fraction of training data to be used.')
+parser.add_argument('--seed', type=int, default=45,
+                    help='Seed used for train-val-test split.')
 args = parser.parse_args()
 
 
@@ -50,7 +54,7 @@ test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
 # * ----- Model
 model = eval(f"gnn.{args.arch.upper()}_{args.name}(pooling='{args.pool}')")
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 criterion = torch.nn.CrossEntropyLoss()
 device = "cpu"
 model = model.to(device)
@@ -117,14 +121,16 @@ def test(loader):
 best_acc = 0
 best_state_dict = model.state_dict()
 best_epoch = 0
+patience = 100
+warmup = 90
 for epoch in range(1, 1001):
-    if epoch-best_epoch > 100 and epoch > 100:
+    if epoch > warmup and epoch - best_epoch > patience:
         print("early stopped")
         break
     train()
     train_acc = test(train_loader)
     val_acc = test(val_loader)
-    if val_acc > best_acc:
+    if epoch > warmup and val_acc > best_acc:
         best_acc = val_acc
         best_state_dict = deepcopy(model.state_dict())
         best_epoch = epoch
@@ -137,7 +143,15 @@ torch.save(model.state_dict(), f"{FOLDER}/model.pt")
 test_acc = test(test_loader)
 train_acc = test(train_loader)
 val_acc = test(val_loader)
-print(f"{args.name} {args.arch.upper()} {args.seed} {args.pool}")
+print()
+print(f"Name:{args.name}, Architecture:{args.arch}, Seed:{args.seed}, Pooling:{args.pool}")
+print(f"Best epoch: {best_epoch}")
+print(f"Train acc: {round(train_acc, 4)}")
+print(f"Val acc: {round(val_acc, 4)}")
 print(f"Test acc: {round(test_acc, 4)}")
-print(f"Train acc: {round(train_acc,4)}")
-print(f"Val acc: {round(val_acc,4)}")
+
+with open(f"{FOLDER}/model_acc.log", "w") as file:
+    file.write(f"Name:{args.name}, Architecture:{args.arch}, Seed:{args.seed}, Pooling:{args.pool}")
+    file.write(f"\nTrain acc: {round(train_acc, 4)}")
+    file.write(f"\nVal acc: {round(val_acc, 4)}")
+    file.write(f"\nTest acc: {round(test_acc, 4)}")

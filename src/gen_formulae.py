@@ -1,50 +1,58 @@
 """Generate formulae over the ctrees identified by gen_shap.py"""
-from pysrModel import PySrModelBoolean  # * Import this first!
+from pysr import PySRRegressor # Import this first!
 
-import shutil
 import warnings
 from argparse import ArgumentParser
 from os import makedirs
-from pickle import load
+from pickle import dump, load
+from shutil import rmtree
+from time import process_time
 
+import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
+import pandas as pd
+import seaborn as sns
+import sympy
+import torch
 import torch_geometric as pyg
 from torch_geometric.loader import DataLoader
-import networkx as nx
-import torch
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 import gnn
 import utils
-from pygcanl import canonical
 
 sns.set()
 sns.set_style("white")
-
+warnings.filterwarnings('ignore')
 
 parser = ArgumentParser(description='Process some parameters.')
-parser.add_argument('--name', type=str, help='Name parameter', required=True)
+parser.add_argument('--name', type=str, required=True,
+                    help='Dataset name (case-sensitive) as passed to pyg',
+                    choices=["BAMultiShapesDataset", "MUTAG", "Mutagenicity", "NCI1"],)
 parser.add_argument('--arch', type=str,
                     choices=['GCN', 'GIN', 'GAT'], help='GNN model architecutre', required=True)
-parser.add_argument('--pool', type=str, default='add',
-                    help='Model parameter')
+parser.add_argument('--pool', type=str, default='add', choices=['add', 'mean', 'max'],
+                    help='Graph pooling layer.')
 parser.add_argument('--size', type=float, default=1.0,
-                    help='Size parameter')
+                    help='Fraction of training data to be used.')
 parser.add_argument('--seed', type=int, default=45,
-                    help='Seed parameter')
+                    help='Seed used for train-val-test split.')
+parser.add_argument('-k', type=int, default=200, help="k in top-k ctrees based on their shapley values")
+parser.add_argument('-s', '--sample', type=float, choices=[0.05, 0.25, 0.5, 0.75, 1.0], default=1.0)
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
 FOLDER = f"../data/{args.name}/{args.arch}/{args.pool}/{args.size}/{args.seed}/"
-PLOT_FOLDER = f"../plots/{args.name}/{args.arch}/{args.pool}/{args.size}/{args.seed}/"
+PLOT_FOLDER = f"../plots/{args.name}/{args.arch}/{args.pool}/{args.size}/{args.seed}/sample{args.sample}"
 makedirs(FOLDER, exist_ok=True)
+
+rmtree(PLOT_FOLDER, ignore_errors=True)
 makedirs(PLOT_FOLDER, exist_ok=True)
 
 
 # * ----- Data
 TU_DATASETS = ["MUTAG", "Mutagenicity", "NCI1"]
-if args.name in TU_DATASETS and args.name != "NCI1":
+if args.name in TU_DATASETS:
     dataset = pyg.datasets.TUDataset(root="../data/", name=args.name)
 elif args.name == "BAMultiShapesDataset":
     dataset = pyg.datasets.BAMultiShapesDataset(root=f"../data/{args.name}")
@@ -64,75 +72,33 @@ train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
 val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
+with open(f"{FOLDER}/cnt_ind_vec.pkl", "rb") as file:
+    cnt_ind_vec = load(file)
 
-# * ----- Computation trees
-processed_dataset = utils.preprocess_dataset(
-    [dataset[i] for i in train_indices])
-list_of_dfs_id_codes = canonical(processed_dataset, 3)
+with open(f"{FOLDER}/cnt_ind_vec_test.pkl", "rb") as file:
+    cnt_ind_vec_test = load(file)
 
-dict_dfs_id_codes = {}
-all_ctree_codes = []
-graph_cnt_lst = []
+if args.sample != 1.0:
+    ORIG = FOLDER
+    # replace args.size with args.sample
+    FOLDER = f"../data/{args.name}/{args.arch}/{args.pool}/{args.sample}/{args.seed}/"
 
-for l in list_of_dfs_id_codes:
-    temp = []
-    d = {}
-    for s in l:
-        key = s.split('/')[0]
-        val = s.split('/')[1]
-        temp.append(key)
-        dict_dfs_id_codes[key] = val
-        if key in d:
-            d[key] += 1
-        else:
-            d[key] = 1
-    graph_cnt_lst.append(d)
-    all_ctree_codes.append(temp)
+with open(f"{FOLDER}/dict_dfs_id_codes.pkl", "rb") as file:
+    dict_dfs_id_codes = load(file)
+with open(f"{FOLDER}/unique_ctree_codes.pkl", "rb") as file:
+    unique_ctree_codes = load(file)
 
-# Calculated in train, used directly in test.
-unique_ctree_codes = list(dict_dfs_id_codes.keys())
+with open(f"{FOLDER}shap_values.pkl", "rb") as file:
+    shap_values = load(file)
+    shap_imp = np.abs(shap_values).mean(axis=0)
+    indices = np.argsort(shap_imp)
 
-processed_dataset_test = utils.preprocess_dataset(
-    [dataset[i] for i in test_indices])
-list_of_dfs_id_codes_test = canonical(processed_dataset_test, 3)
-
-dict_dfs_id_codes_test = {}
-all_ctree_codes_test = []
-graph_cnt_lst_test = []
-
-for l in list_of_dfs_id_codes_test:
-    temp = []
-    d = {}
-    for s in l:
-        key = s.split('/')[0]
-        val = s.split('/')[1]
-        temp.append(key)
-        dict_dfs_id_codes_test[key] = val
-        if key in d:
-            d[key] += 1
-        else:
-            d[key] = 1
-    graph_cnt_lst_test.append(d)
-    all_ctree_codes_test.append(temp)
-
-test_ind_vec = []
-for g_dict in graph_cnt_lst_test:
-    temp = []
-    for ct in unique_ctree_codes:
-        if ct in g_dict:
-            temp.append(g_dict[ct])
-        else:
-            temp.append(0)
-    test_ind_vec.append(temp)
-test_ind_vec = np.array(test_ind_vec)
+if args.sample != 1.0:
+    FOLDER = ORIG
 
 model = eval(f"gnn.{args.arch}_{args.name}(pooling='{args.pool}')")
 model.eval()
-try:
-    model.load_state_dict(torch.load(f"{FOLDER}/model.pt", map_location="cpu"))
-except FileNotFoundError:
-    print("[ERROR] Couldn't find model weights.")
-    exit(1)
+model.load_state_dict(torch.load(f"{FOLDER}/model.pt", map_location="cpu"))
 
 
 def predict(loader):
@@ -140,8 +106,6 @@ def predict(loader):
     predictions = []
     probabilities = []
     for data in loader:
-        data = data
-
         if args.arch == 'GCN' or args.arch == 'GIN':
             out, __, __ = model(
                 x=data.x,
@@ -170,26 +134,10 @@ def predict(loader):
 
 train_pred, train_prob = predict(train_loader)
 test_pred, test_prob = predict(test_loader)
+pysr_weights = [max(prob) for prob in train_prob]
 
-pysr_weights = []
-for prob in train_prob:
-    pysr_weights.append(max(prob))
-
-with open(f"{FOLDER}shap_ind_vec.pkl", "rb") as file:
-    cnt_ind_vec = load(file)
-
-try:
-    with open(f"{FOLDER}shap_values.pkl", "rb") as file:
-        shap_values = load(file)
-    shap_imp = np.abs(shap_values).mean(axis=0)
-except FileNotFoundError:
-    print("[ERROR] Couldn't find Shape Values.")
-    exit(1)
-
-indices = np.argsort(shap_imp)
-
-x_train = cnt_ind_vec[:, indices[-200:]]
-x_test = test_ind_vec[:, indices[-200:]]
+x_train = cnt_ind_vec[:, indices[- args.k:]]
+x_test = cnt_ind_vec_test[:, indices[- args.k:]]
 x_train_bin = []
 for lst in x_train:
     temp = []
@@ -209,131 +157,220 @@ for lst in x_test:
         else:
             temp.append(0)
     x_test_bin.append(temp)
-warnings.filterwarnings('ignore')
 
-shutil.rmtree('./HallOfFame', ignore_errors=True)
-makedirs('./HallOfFame')
-pysrmodelB = PySrModelBoolean(
-    x_train_bin, x_test_bin, train_pred, test_pred, pysr_weights)
-pysrmodelB.fit()
-train_acc = round(pysrmodelB.get_train_acc(), 3)
-test_acc = round(pysrmodelB.get_test_acc(), 3)
-equation = pysrmodelB.model.get_best().equation
+
+# * ----- Symbolic Regression
+start_time = process_time()
+
+pysrmodel = PySRRegressor(
+    unary_operators = ["Not(x) = (x <= zero(x)) * one(x)"],
+    binary_operators = [
+        "And(x, y) = ((x > zero(x)) & (y > zero(y))) * one(x)",
+        "Or(x, y)  = ((x > zero(x)) | (y > zero(y))) * one(x)",
+        "Xor(x, y) = (((x > 0) & (y <= 0)) | ((x <= 0) & (y > 0))) * 1f0",
+    ],
+    extra_sympy_mappings = {
+        "Not": lambda x: sympy.Piecewise((1.0, (x <= 0)), (0.0, True)),
+        "And": lambda x, y: sympy.Piecewise((1.0, (x > 0) & (y > 0)), (0.0, True)),
+        "Or":  lambda x, y: sympy.Piecewise((1.0, (x > 0) | (y > 0)), (0.0, True)),
+        "Xor": lambda x, y: sympy.Piecewise((1.0, (x > 0) ^ (y > 0)), (0.0, True)),
+    },
+    elementwise_loss = "loss(prediction, target) = sum(prediction != target)",
+    model_selection="best",
+
+    should_optimize_constants=False,
+
+    select_k_features = min(args.k, 10),
+    weights = pysr_weights,
+    # batch_size = 32, #? How does batching help? Try it on bigger datasets.
+
+    # Paperwork
+    temp_equation_file = True,
+    delete_tempfiles = True,
+
+    # Determinism
+    procs=0,
+    deterministic=True,
+    multithreading=False,
+    random_state=0,
+    warm_start=False,
+)
+
+pysrmodel.fit(x_train_bin, train_pred)
+selected_ctrees = pysrmodel.selection_mask_
+
+df_equations = pysrmodel.equations.drop(["sympy_format", "lambda_format"], axis=1)
+df_equations.to_csv(f"{FOLDER}/equations.csv", index=False)
+del df_equations
+
+pysr_train_pred = torch.LongTensor(pysrmodel.predict(x_train_bin))
+pysr_test_pred = torch.LongTensor(pysrmodel.predict(x_test_bin))
+
+torch.save(torch.LongTensor(train_pred), f"{FOLDER}/gnn_train_pred.pt")
+torch.save(torch.LongTensor(test_pred), f"{FOLDER}/gnn_test_pred.pt")
+torch.save(pysr_train_pred, f"{FOLDER}/pysr_train_pred_sample{args.sample}.pt")
+torch.save(pysr_test_pred, f"{FOLDER}/pysr_test_pred_sample{args.sample}.pt")
+
+def cal_pysr_acc(X, Y):
+    Y = np.array(Y)
+    Y_pred = pysrmodel.predict(X)
+    assert Y.shape == Y_pred.shape , "Shape mismatch!"
+    return (Y_pred == Y).sum() / len(Y)
+
+equation = pysrmodel.get_best().equation
+print("=" * 50)
+print("Equation:", equation)
 equation = utils.simplify_expression(equation)
-print(f"{args.name} - {args.seed} - {args.size}")
-print("TRAIN ACCURACY : ", train_acc)
-print("TEST ACCURACY : ", test_acc)
-print("EQUATION : ", equation)
+
+train_acc = round(cal_pysr_acc(x_train_bin, train_pred), 3)
+test_acc  = round(cal_pysr_acc(x_test_bin, test_pred), 3)
+
+print("=" * 50)
+print("Equation:", equation)
+print(f"Name:{args.name} - Seed:{args.seed} - Size:{args.size}")
+print("Train accuracy:", train_acc)
+print("Test accuracy:", test_acc)
+
+with open(f"{FOLDER}/pysrmodel_sample{args.sample}.pkl", "wb") as file:
+    dump(pysrmodel, file)
+del pysrmodel
+
+end_time = process_time()
+print(f"[TIME] gen_formulae: {end_time - start_time} s.ms")
+
+
+# * ----- Visualize the computation trees present in the forumulae.
 variables_eq = utils.getVariables(equation)
 
-del pysrmodelB
-
-
+node_mapping = None
 if args.name == "MUTAG":
-    l = {0: "C", 1: "N", 2: "O", 3: "F", 4: "I", 5: "Cl", 6: "Br"}
+    node_mapping = {0: "C", 1: "N", 2: "O", 3: "F", 4: "I", 5: "Cl", 6: "Br"}
 elif args.name == "Mutagenicity":
-    l = {0: 'C', 1: 'O', 2: 'Cl', 3: 'H', 4: 'N', 5: 'F', 6: 'Br',
-         7: 'S', 8: 'P', 9: 'I', 10: 'Na', 11: 'K', 12: 'Li', 13: 'Ca'}
-elif args.name == "BAMultiShapesDataset":
-    l = {1: '*'}
+    node_mapping = {0: 'C', 1: 'O', 2: 'Cl', 3: 'H', 4: 'N', 5: 'F', 6: 'Br',
+                    7: 'S', 8: 'P', 9: 'I', 10: 'Na', 11: 'K', 12: 'Li', 13: 'Ca'}
 
-clr = ['g', 'k', 'r', 'skyblue']
+FIGSIZE = (8, 6)
+NODESIZE = ...
+EDGE_WIDTH = 1.75
+NODE_COLOR = "#FD5D02"
+colors = ['green', 'black', 'blue', 'red'] # aromatic, single, double, triple
 
-for v in variables_eq:
-    if str(v)[0] != "x":
-        continue
-    v = int(str(v)[1:])
-    code_dfs = unique_ctree_codes[indices[-200:][v]]
+# for v in variables_eq:
+#     if str(v)[0] != "x":
+#         continue
+#     v = int(str(v)[1:])
+for v in selected_ctrees:
+    code_dfs = unique_ctree_codes[indices[- args.k:][v]]
     code_id = dict_dfs_id_codes[code_dfs]
 
+    # * ----- Ctree using node attributes
     if args.name == 'BAMultiShapesDataset':
-        G = utils.graph_from_dfs_code(code_id)
+        ctree = utils.graph_from_dfs_code(code_id)
     else:
-        G = utils.graph_from_dfs_code(code_dfs)
+        ctree = utils.graph_from_dfs_code(code_dfs)
+    ctree = ctree.reverse()
 
-    G = G.reverse()
+    edge_colors = None
+    if args.name in ["MUTAG", "Mutagenicity"]:
+        edge_colors = [colors[ctree.edges[edge]['attr']] for edge in ctree.edges()]
 
-    if args.name != "NCI1":
-        edge_colours = [clr[G.edges[edge]['attr']] for edge in G.edges()]
     labeldict = {}
-
-    for i in range(len(G.nodes)):
-        if args.name in TU_DATASETS and args.name != "NCI1":
-            labeldict[i] = l[G.nodes[i]['attr']]
+    for i in range(len(ctree.nodes)):
+        if args.name in ["MUTAG", "Mutagenicity"]:
+            labeldict[i] = node_mapping[ctree.nodes[i]['attr']]
         elif args.name == "NCI1":
-            labeldict[i] = G.nodes[i]['attr']
-        else:
-            labeldict[i] = '*'
+            labeldict[i] = ctree.nodes[i]['attr']
 
-    plt.figure(figsize=(6, 4))
+    plt.figure(figsize=FIGSIZE)
     plt.title(v)
-
     if args.name == "NCI1":
-        nx.draw_planar(G, labels=labeldict, with_labels=True,
-                       node_color="#f2780d")
+        nx.draw_planar(
+            ctree,
+            labels=labeldict,
+            with_labels=True,
+            node_color=NODE_COLOR,
+            width=EDGE_WIDTH
+        )
     elif args.name in TU_DATASETS:
-        nx.draw_planar(G, labels=labeldict, with_labels=True,
-                       node_color="#f2780d", edge_color=edge_colours, width=3)
+        nx.draw_planar(
+            ctree,
+            labels=labeldict,
+            with_labels=True,
+            node_color=NODE_COLOR,
+            width=EDGE_WIDTH,
+            edge_color=edge_colors,
+        )
     else:
-        nx.draw_kamada_kawai(utils.dfs(G), node_color="#FD5D02",
-                             width=1.75, style="solid")  # 9f67e5, #f2780d
+        nx.draw_planar(ctree, node_color=NODE_COLOR, width=EDGE_WIDTH)
 
     plt.savefig(f"{PLOT_FOLDER}/{v}_ctree.png")
-    # ------------------------
 
-    G = utils.graph_from_dfs_code(code_id)
-    G = G.reverse()
-    edge_colours = [clr[G.edges[edge]['attr']] for edge in G.edges()]
 
-    labeldict = {}
+    # * ----- Ctree using node ids
+    ctree_id = utils.graph_from_dfs_code(code_id)
+    ctree_id = ctree_id.reverse()
 
-    for i in range(len(G.nodes)):
-        if args.name in TU_DATASETS and args.name != "NCI1":
-            labeldict[i] = G.nodes[i]['attr']
-        elif args.name == "NCI1":
-            labeldict[i] = G.nodes[i]['attr']
-        else:
-            labeldict[i] = '*'
+    labeldict = None
+    if args.name in TU_DATASETS:
+        labeldict = {}
+        for i in range(len(ctree_id.nodes)):
+            labeldict[i] = ctree_id.nodes[i]['attr']
 
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=FIGSIZE)
     plt.title(v)
     if args.name == "NCI1":
-        nx.draw_planar(G, labels=labeldict, with_labels=True,
-                       node_color="#f2780d")
+        nx.draw_planar(
+            ctree_id,
+            labels=labeldict,
+            with_labels=True,
+            node_color=NODE_COLOR,
+            width=EDGE_WIDTH,
+        )
     elif args.name in TU_DATASETS:
-        nx.draw_planar(G, labels=labeldict, with_labels=True,
-                       edge_color=edge_colours, width=3, node_color="#f2780d")
+        nx.draw_planar(
+            ctree_id,
+            labels=labeldict,
+            with_labels=True,
+            node_color=NODE_COLOR,
+            width=EDGE_WIDTH,
+            edge_color=edge_colors,
+        )
     else:
-        nx.draw_kamada_kawai(utils.dfs(G), node_color="#f2780d",
-                             width=1.75, style="dotted")  # 9f67e5, #f2780d
+        nx.draw_planar(ctree_id, node_color=NODE_COLOR, width=EDGE_WIDTH)
 
     plt.savefig(f"{PLOT_FOLDER}/{v}_ctree_id.png")
-    # ------------------------
 
-    G = utils.graph_from_dfs_code(code_id)
-    G = G.reverse()
 
-    labeldict = {}
-    G = utils.dfs(G)
-    edge_colours = [clr[G.edges[edge]['attr']] for edge in G.edges()]
-    for i in G.nodes:
-        if args.name in TU_DATASETS and args.name != "NCI1":
+    # * ----- Ctree to subgraph
+    G = utils.dfs(ctree=ctree, ctree_id=ctree_id, node_mapping=node_mapping)
+    edge_colors = [colors[G.edges[edge]['attr']] for edge in G.edges()]
+
+    labeldict = None
+    if args.name in TU_DATASETS:
+        labeldict = {}
+        for i in G.nodes:
             labeldict[i] = G.nodes[i]['attr']
-        elif args.name == "NCI1":
-            labeldict[i] = G.nodes[i]['attr']
-        else:
-            labeldict[i] = '*'
 
-    plt.figure(figsize=(7, 5))
+    plt.figure(figsize=FIGSIZE)
     plt.title(v)
     if args.name == "NCI1":
-        nx.draw_planar(G, labels=labeldict, with_labels=True,
-                       node_color="#f2780d")
+        nx.draw_kamada_kawai(
+            G,
+            labels=labeldict,
+            with_labels=True,
+            node_color=NODE_COLOR,
+            width=EDGE_WIDTH,
+        )
     elif args.name in TU_DATASETS:
-        nx.draw_kamada_kawai(G, labels=labeldict, with_labels=True,
-                             edge_color=edge_colours, width=3, node_color="#f2780d")
+        nx.draw_kamada_kawai(
+            G,
+            labels=labeldict,
+            with_labels=True,
+            node_color=NODE_COLOR,
+            width=EDGE_WIDTH,
+            edge_color=edge_colors,
+        )
     else:
-        nx.draw_kamada_kawai(utils.dfs(G), node_color="#f2780d",
-                             width=1.75, style="dotted")  # 9f67e5, #f2780d
+        nx.draw_kamada_kawai(G, node_color=NODE_COLOR, width=EDGE_WIDTH)
 
     plt.savefig(f"{PLOT_FOLDER}/{v}_structure.png")
