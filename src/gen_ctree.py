@@ -35,7 +35,7 @@ args = parser.parse_args()
 
 torch.manual_seed(args.seed)
 FOLDER = f"../data/{args.name}/{args.arch}/{args.pool}/{args.size}/{args.seed}/"
-makedirs(FOLDER, exist_ok=True)
+# makedirs(FOLDER, exist_ok=True)
 
 
 # * ----- Data
@@ -95,7 +95,7 @@ for l in list_of_dfs_id_codes:
     graph_cnt_lst.append(d)
     all_ctree_codes.append(temp)
 
-# Calculated in train, used directly in test.
+# Calculated in train, used directly in val, test.
 unique_ctree_codes = list(dict_dfs_id_codes.keys())
 
 with open(f"{FOLDER}/dict_dfs_id_codes.pkl", "wb") as file:
@@ -116,6 +116,46 @@ cnt_ind_vec = np.array(cnt_ind_vec)
 
 with open(f"{FOLDER}/cnt_ind_vec.pkl", "wb") as file:
     dump(cnt_ind_vec, file)
+
+
+# * ----- Indicator vectors of validation graphs
+processed_dataset_val = utils.preprocess_dataset(
+    [dataset[i] for i in val_indices])
+list_of_dfs_id_codes_val = canonical(processed_dataset_val, 3)
+
+dict_dfs_id_codes_val = {}
+all_ctree_codes_val = []
+graph_cnt_lst_val = []
+
+for l in list_of_dfs_id_codes_val:
+    temp = []
+    d = {}
+    for s in l:
+        key = s.split('/')[0]
+        val = s.split('/')[1]
+        temp.append(key)
+        dict_dfs_id_codes_val[key] = val
+        if key in d:
+            d[key] += 1
+        else:
+            d[key] = 1
+    graph_cnt_lst_val.append(d)
+    all_ctree_codes_val.append(temp)
+
+cnt_ind_vec_val = []
+for g_dict in graph_cnt_lst_val:
+    temp = []
+    for ct in unique_ctree_codes:
+        if ct in g_dict:
+            temp.append(g_dict[ct])
+        else:
+            temp.append(0)
+    cnt_ind_vec_val.append(temp)
+cnt_ind_vec_val = np.array(cnt_ind_vec_val)
+
+with open(f"{FOLDER}/cnt_ind_vec_val.pkl", "wb") as file:
+    dump(cnt_ind_vec_val, file)
+
 
 # * ----- Indicator vectors of test graphs
 processed_dataset_test = utils.preprocess_dataset(
@@ -158,12 +198,8 @@ with open(f"{FOLDER}/cnt_ind_vec_test.pkl", "wb") as file:
 
 # * ----- Ctree Embeddings
 model = eval(f"gnn.{args.arch.upper().upper()}_{args.name}(pooling='{args.pool}')")
+model.load_state_dict(torch.load(f"{FOLDER}/model.pt", map_location="cpu"))
 model.eval()
-try:
-    model.load_state_dict(torch.load(f"{FOLDER}/model.pt", map_location="cpu"))
-except FileNotFoundError:
-    print("[ERROR] Couldn't find model weights.")
-    exit(1)
 
 ctree_embeddings = []
 with torch.no_grad():

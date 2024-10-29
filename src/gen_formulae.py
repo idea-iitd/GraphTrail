@@ -39,6 +39,7 @@ parser.add_argument('--seed', type=int, default=45,
                     help='Seed used for train-val-test split.')
 parser.add_argument('-k', type=int, default=200, help="k in top-k ctrees based on their shapley values")
 parser.add_argument('-s', '--sample', type=float, choices=[0.05, 0.25, 0.5, 0.75, 1.0], default=1.0)
+parser.add_argument('-c', type=float, default=1.0)
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
@@ -74,7 +75,8 @@ test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
 with open(f"{FOLDER}/cnt_ind_vec.pkl", "rb") as file:
     cnt_ind_vec = load(file)
-
+with open(f"{FOLDER}/cnt_ind_vec_val.pkl", "rb") as file:
+    cnt_ind_vec_val = load(file)
 with open(f"{FOLDER}/cnt_ind_vec_test.pkl", "rb") as file:
     cnt_ind_vec_test = load(file)
 
@@ -92,6 +94,7 @@ with open(f"{FOLDER}shap_values.pkl", "rb") as file:
     shap_values = load(file)
     shap_imp = np.abs(shap_values).mean(axis=0)
     indices = np.argsort(shap_imp)
+
 
 if args.sample != 1.0:
     FOLDER = ORIG
@@ -133,30 +136,27 @@ def predict(loader):
 
 
 train_pred, train_prob = predict(train_loader)
+val_pred, val_prob = predict(val_loader)
 test_pred, test_prob = predict(test_loader)
+
 pysr_weights = [max(prob) for prob in train_prob]
 
 x_train = cnt_ind_vec[:, indices[- args.k:]]
+x_val = cnt_ind_vec_val[:, indices[- args.k:]]
 x_test = cnt_ind_vec_test[:, indices[- args.k:]]
-x_train_bin = []
-for lst in x_train:
-    temp = []
-    for i in lst:
-        if i > 0:
-            temp.append(1)
-        else:
-            temp.append(0)
-    x_train_bin.append(temp)
 
+x_train_bin = []
+x_val_bin = []
 x_test_bin = []
-for lst in x_test:
-    temp = []
-    for i in lst:
-        if i > 0:
-            temp.append(1)
-        else:
-            temp.append(0)
-    x_test_bin.append(temp)
+for set_ in ["train", "val", "test"]:
+    for lst in eval(f"x_{set_}"):
+        temp = []
+        for i in lst:
+            if i > 0:
+                temp.append(1)
+            else:
+                temp.append(0)
+        eval(f"x_{set_}_bin.append(temp)")
 
 
 # * ----- Symbolic Regression
@@ -175,14 +175,17 @@ pysrmodel = PySRRegressor(
         "Or":  lambda x, y: sympy.Piecewise((1.0, (x > 0) | (y > 0)), (0.0, True)),
         "Xor": lambda x, y: sympy.Piecewise((1.0, (x > 0) ^ (y > 0)), (0.0, True)),
     },
-    elementwise_loss = "loss(prediction, target) = sum(prediction != target)",
-    model_selection="best",
 
-    should_optimize_constants=False,
+    elementwise_loss = "loss(prediction, target) = sum(prediction != target)",
+    model_selection="accuracy",
+
+    complexity_of_variables=args.c,
+    complexity_of_operators={'Not': args.c, 'And': args.c, 'Or': args.c, 'Xor': args.c},
 
     select_k_features = min(args.k, 10),
     weights = pysr_weights,
-    # batch_size = 32, #? How does batching help? Try it on bigger datasets.
+
+    batch_size = 32,
 
     # Paperwork
     temp_equation_file = True,
@@ -196,41 +199,104 @@ pysrmodel = PySRRegressor(
     warm_start=False,
 )
 
-pysrmodel.fit(x_train_bin, train_pred)
-selected_ctrees = pysrmodel.selection_mask_
-
-df_equations = pysrmodel.equations.drop(["sympy_format", "lambda_format"], axis=1)
-df_equations.to_csv(f"{FOLDER}/equations.csv", index=False)
-del df_equations
-
-pysr_train_pred = torch.LongTensor(pysrmodel.predict(x_train_bin))
-pysr_test_pred = torch.LongTensor(pysrmodel.predict(x_test_bin))
-
-torch.save(torch.LongTensor(train_pred), f"{FOLDER}/gnn_train_pred.pt")
-torch.save(torch.LongTensor(test_pred), f"{FOLDER}/gnn_test_pred.pt")
-torch.save(pysr_train_pred, f"{FOLDER}/pysr_train_pred_sample{args.sample}.pt")
-torch.save(pysr_test_pred, f"{FOLDER}/pysr_test_pred_sample{args.sample}.pt")
-
-def cal_pysr_acc(X, Y):
+def cal_pysr_acc(X, Y, index=None):
     Y = np.array(Y)
-    Y_pred = pysrmodel.predict(X)
+    Y_pred = pysrmodel.predict(X, index=index)
     assert Y.shape == Y_pred.shape , "Shape mismatch!"
     return (Y_pred == Y).sum() / len(Y)
 
+
+pysrmodel.fit(x_train_bin, train_pred)
+print(pysrmodel)
+
+selected_ctrees = pysrmodel.selection_mask_
+
+df_equations = pysrmodel.equations.drop(["sympy_format", "lambda_format"], axis=1)
+# Add a column for accuracy.
+df_equations["acc"] = 1 - df_equations["loss"]
+# Re-arrange columns to have "acc" as the second column.
+cols = df_equations.columns.tolist()
+cols.insert(1, cols.pop(-1))
+df_equations = df_equations[cols]
+# Round values.
+for col in ["acc", "loss", "score"]:
+    df_equations[col] = df_equations[col].round(4)
+
+
+# Find the equation that performs the best on the validation set
+best_val_acc = 0
+print("\nValidation accuracies:")
+for j in range(pysrmodel.equations_.shape[0]):
+    # PySR sometimes fails to evaluate certain formulae
+    # it usually happens when C is set to a small value.
+    # We've been unable to identify when and why it happens
+    try:
+        __ = pysrmodel.predict(x_train_bin, index=j)
+        __ = pysrmodel.predict(x_test_bin, index=j)
+        pysr_val_pred = pysrmodel.predict(x_val_bin, index=j)
+    except ValueError:
+        print(f"{j}: failed")
+        continue
+    val_acc = (pysr_val_pred == val_pred).sum() / len(val_pred)
+    print(f"{j}: {val_acc}")
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        best_index = j
+print("Best equation index:", best_index)
+
+
+# * ----- Metrics
+pysr_train_pred = pysrmodel.predict(x_train_bin, index=best_index)
+pysr_test_pred = pysrmodel.predict(x_test_bin, index=best_index)
+pysr_train_pred = torch.LongTensor(pysr_train_pred)
+pysr_test_pred = torch.LongTensor(pysr_test_pred)
+
+
+"""
+# Best
 equation = pysrmodel.get_best().equation
+print(f"\nName:{args.name} - Seed:{args.seed} - Size:{args.size}")
 print("=" * 50)
 print("Equation:", equation)
-equation = utils.simplify_expression(equation)
 
 train_acc = round(cal_pysr_acc(x_train_bin, train_pred), 3)
 test_acc  = round(cal_pysr_acc(x_test_bin, test_pred), 3)
 
+equation = utils.simplify_expression(equation)
+print("Simplified equation:", equation)
+print("Train accuracy:", train_acc)
+print("Test accuracy:", test_acc)
+"""
+
+# Best based on val set
+equation = pysrmodel.get_best(index=best_index).equation
+print()
 print("=" * 50)
 print("Equation:", equation)
-print(f"Name:{args.name} - Seed:{args.seed} - Size:{args.size}")
+print("C =", args.c)
+
+train_acc = round(cal_pysr_acc(x_train_bin, train_pred, index=best_index), 3)
+test_acc  = round(cal_pysr_acc(x_test_bin, test_pred, index=best_index), 3)
+
+equation = utils.simplify_expression(equation)
+print("Simplified equation:", equation)
 print("Train accuracy:", train_acc)
 print("Test accuracy:", test_acc)
 
+
+# * ----- Save stuff to disk
+# Save equations
+df_equations.to_csv(f"{FOLDER}/equations_sample{args.sample}.csv", index=True)
+del df_equations
+
+# Save predictions
+torch.save(torch.LongTensor(train_pred), f"{FOLDER}/gnn_train_pred.pt")
+torch.save(torch.LongTensor(test_pred), f"{FOLDER}/gnn_test_pred.pt")
+# torch.save(pysr_train_pred, f"{FOLDER}/pysr_train_pred_sample{args.sample}.pt")
+torch.save(pysr_test_pred, f"{FOLDER}/pysr_test_pred_sample{args.sample}.pt")
+del train_pred, test_pred, pysr_train_pred, pysr_test_pred
+
+# Save pysrmodel
 with open(f"{FOLDER}/pysrmodel_sample{args.sample}.pkl", "wb") as file:
     dump(pysrmodel, file)
 del pysrmodel

@@ -21,4 +21,15 @@ data/NCI1/*
 !data/NCI1/raw/
 !data/NCI1/raw/*
 
+data/graphtrail_files/
+graphtrail_files.zip
+
 data/*.log
+
+data/neuro_data/
+data/neuro_data.zip
+
+rough.ipynb
+rough.py
+
+rebuttal_src_files/

@@ -33,6 +33,7 @@ with open(f"{FOLDER}/cnt_ind_vec.pkl", "rb") as file:
     cnt_ind_vec = load(file)
 
 model = eval(f"gnn.{args.arch.upper()}_{args.name}(pooling='{args.pool}')")
+model.load_state_dict(torch.load(f"{FOLDER}/model.pt", map_location="cpu"))
 model.eval()
 
 

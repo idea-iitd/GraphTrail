@@ -40,11 +40,10 @@ for name in ["BAMultiShapesDataset", "MUTAG", "Mutagenicity", "NCI1"]:
             shuffle=True,
             stratify=dataset.y[train_indices]
         )
-        train_indices_1 = deepcopy(train_indices)
 
         for size in [0.05, 0.25, 0.5, 0.75, 1.0]:
             if size == 1.0:
-                train_indices_small = deepcopy(train_indices_1)
+                train_indices_small = deepcopy(train_indices)
             else:
                 train_indices_small, __ = train_test_split(
                     train_indices,

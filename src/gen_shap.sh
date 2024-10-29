@@ -5,7 +5,9 @@ pools=("add" "max" "mean")
 sizes=(0.05 0.25 0.5 0.75 1.0)
 
 # Use variables like this to run one at a time.
-datasets=("Mutagenicity")
+datasets=("MUTAG")
+archs=("GCN")
+pools=("add")
 sizes=(1.0)
 
 for dataset in "${datasets[@]}"; do
@@ -26,12 +28,19 @@ for dataset in "${datasets[@]}"; do
                     gen_shap="taskset -c 0-71 python gen_shap.py\
                             --name ${dataset} --arch ${arch} --pool ${pool}\
                             --size ${size} --seed ${seed} --procs 72"
+                    
+                    gen_shap_eig="taskset -c 0-71 python gen_shap_eig.py\
+                            --name ${dataset} --arch ${arch} --pool ${pool}\
+                            --size ${size} --seed ${seed} --procs 72"
 
                     log_1="${log_file_prefix}/gen_shap_1.log"
                     log_2="${log_file_prefix}/gen_shap_2.log"
 
                     echo $gen_shap
                     { time $gen_shap ; } > $log_1 2> $log_2
+
+                    # echo $gen_shap_eig
+                    # { time $gen_shap_eig ; } > $log_1 2> $log_2
                 done
             done
         done
