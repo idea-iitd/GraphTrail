@@ -11,6 +11,8 @@ To cite our work, use:
 }
 ```
 
+![GraphTrail's Pipeline](pipeline.png)
+
 # Environment
 ```bash
 conda env create -f GraphTrail.yml
