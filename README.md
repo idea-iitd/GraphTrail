@@ -1,7 +1,15 @@
-# GraphTrail
-GrpahTrail: Translating GNN Predictions into Human-Interpretable Logical Rules
+# GraphTrail: Translating GNN Predictions into Human-Interpretable Logical Rules
 
-NOTE: All commands should be run from `src/`
+This is the official repository of [GraphTrail](https://openreview.net/pdf?id=fzlMza6dRZ) accepted at NeurIPS 2024.
+
+To cite our work, use:
+```
+@inproceedings{armgaangraphtrail,
+  title={GraphTrail: Translating GNN Predictions into Human-Interpretable Logical Rules},
+  author={Armgaan, Burouj and Dalmia, Manthan and Medya, Sourav and Ranu, Sayan},
+  booktitle={The Thirty-eighth Annual Conference on Neural Information Processing Systems}
+}
+```
 
 # Environment
 ```bash
