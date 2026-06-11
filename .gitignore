@@ -33,3 +33,8 @@ rough.ipynb
 rough.py
 
 rebuttal_src_files/
+
+# pygcanl build artifacts (from pip install -e pygcanl)
+src/pygcanl/build/
+src/pygcanl/*.so
+src/pygcanl/pygcanl.egg-info/

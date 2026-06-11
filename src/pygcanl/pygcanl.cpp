@@ -167,48 +167,6 @@ std::vector<std::string> data_to_BGraph(py::object data, int n_hops){
     return canonical_labels;
 }
 
-std::vector<std::string> data_to_BGraph_ID(py::object data, int n_hops){
-    py::object x = data.attr("id");
-    py::object edge_index = data.attr("edge_index");
-    py::object edge_attr = data.attr("edge_attr");
-    py::object y = data.attr("y");
-    py::int_ N_ = x.attr("size")(0); // number of nodes
-    py::int_ M_ = edge_attr.attr("size")(0); // number of edges
-    py::int_ u_, v_;
-    int N = N_;
-    int M = M_;
-    int u, v;
-    std::map<std::pair<int, int>, int> edge_pair_to_ind;
-    BGraph G(N);
-    for(int i=0; i<M; i++){
-        u_ = edge_index[py::cast(0)][py::cast(i)];
-        v_ = edge_index[py::cast(1)][py::cast(i)];
-        u = u_;
-        v = v_;
-        if (edge_pair_to_ind.find(std::make_pair(u,v)) != edge_pair_to_ind.end())
-            continue;
-        edge_pair_to_ind.insert(std::make_pair(std::make_pair(u, v), i));
-        edge_pair_to_ind.insert(std::make_pair(std::make_pair(v, u), i));
-        boost::add_edge(u, v, G);
-    }
-    std::vector<int> node_id;
-    std::vector<int> edge_attrs;
-    for(auto el : x){
-        py::int_ item_ = el.attr("item")();
-        int itm_ = item_;
-        node_id.push_back(itm_);
-    }
-    for(auto el : edge_attr){
-        py::int_ item_ = el.attr("item")();
-        int itm_ = item_;
-        edge_attrs.push_back(itm_);
-    }
-    std::vector<std::string> canonical_labels;
-    get_canonical_labels(G, node_id, edge_attrs, edge_pair_to_ind,
-            canonical_labels, n_hops);
-    return canonical_labels;
-}
-
 py::list canonical(py::list list, py::int_ n_hops){
     /* This function gets a list of PyTorch Geometric Data Objects that
      * contain `x`, `edge_index`, `edge_attr`, `y`. Each of which are long tensors.
@@ -223,18 +181,11 @@ py::list canonical(py::list list, py::int_ n_hops){
      * https://octavifs.com/post/pybind11-multithreading-parallellism-python/
      */
     std::vector<std::vector<std::string>> result_vector;
-    std::vector<std::string> dfs_canonical_labels;
-    std::vector<std::string> id_canonical_labels;
     int n_hops_ = n_hops;
     std::cout<<"Generating DFS Codes..."<<std::endl;
     for(auto item : list){
-        std::vector<std::string> canonical_labels;
-        dfs_canonical_labels = data_to_BGraph(py::reinterpret_borrow<py::object>(item), n_hops_);
-        id_canonical_labels = data_to_BGraph_ID(py::reinterpret_borrow<py::object>(item), n_hops);
-        for(int i = 0; i < dfs_canonical_labels.size(); i++)
-        {
-            canonical_labels.push_back(dfs_canonical_labels[i] + "/" + id_canonical_labels[i]);
-        }
+        std::vector<std::string> canonical_labels = data_to_BGraph(
+            py::reinterpret_borrow<py::object>(item), n_hops_);
         result_vector.push_back(canonical_labels);
     }
     std::cout << "Generation complete." << std::endl;

@@ -72,34 +72,26 @@ start_time = process_time()
 
 processed_dataset = utils.preprocess_dataset(
     [dataset[i] for i in train_indices])
-list_of_dfs_id_codes = canonical(processed_dataset, 3)
+list_of_dfs_codes = canonical(processed_dataset, 3)
 
-dict_dfs_id_codes = {}
 all_ctree_codes = []
 graph_cnt_lst = []
+unique_ctree_codes = []
 
-str1 = 'dfs_code \ id_code'
-
-for l in list_of_dfs_id_codes:
+for l in list_of_dfs_codes:
     temp = []
     d = {}
     for s in l:
-        key = s.split('/')[0]
-        val = s.split('/')[1]
-        temp.append(key)
-        dict_dfs_id_codes[key] = val
-        if key in d:
-            d[key] += 1
+        temp.append(s)
+        if s not in unique_ctree_codes:
+            unique_ctree_codes.append(s)
+        if s in d:
+            d[s] += 1
         else:
-            d[key] = 1
+            d[s] = 1
     graph_cnt_lst.append(d)
     all_ctree_codes.append(temp)
 
-# Calculated in train, used directly in val, test.
-unique_ctree_codes = list(dict_dfs_id_codes.keys())
-
-with open(f"{FOLDER}/dict_dfs_id_codes.pkl", "wb") as file:
-    dump(dict_dfs_id_codes, file)
 with open(f"{FOLDER}/unique_ctree_codes.pkl", "wb") as file:
     dump(unique_ctree_codes, file)
 
@@ -121,24 +113,20 @@ with open(f"{FOLDER}/cnt_ind_vec.pkl", "wb") as file:
 # * ----- Indicator vectors of validation graphs
 processed_dataset_val = utils.preprocess_dataset(
     [dataset[i] for i in val_indices])
-list_of_dfs_id_codes_val = canonical(processed_dataset_val, 3)
+list_of_dfs_codes_val = canonical(processed_dataset_val, 3)
 
-dict_dfs_id_codes_val = {}
 all_ctree_codes_val = []
 graph_cnt_lst_val = []
 
-for l in list_of_dfs_id_codes_val:
+for l in list_of_dfs_codes_val:
     temp = []
     d = {}
     for s in l:
-        key = s.split('/')[0]
-        val = s.split('/')[1]
-        temp.append(key)
-        dict_dfs_id_codes_val[key] = val
-        if key in d:
-            d[key] += 1
+        temp.append(s)
+        if s in d:
+            d[s] += 1
         else:
-            d[key] = 1
+            d[s] = 1
     graph_cnt_lst_val.append(d)
     all_ctree_codes_val.append(temp)
 
@@ -160,24 +148,20 @@ with open(f"{FOLDER}/cnt_ind_vec_val.pkl", "wb") as file:
 # * ----- Indicator vectors of test graphs
 processed_dataset_test = utils.preprocess_dataset(
     [dataset[i] for i in test_indices])
-list_of_dfs_id_codes_test = canonical(processed_dataset_test, 3)
+list_of_dfs_codes_test = canonical(processed_dataset_test, 3)
 
-dict_dfs_id_codes_test = {}
 all_ctree_codes_test = []
 graph_cnt_lst_test = []
 
-for l in list_of_dfs_id_codes_test:
+for l in list_of_dfs_codes_test:
     temp = []
     d = {}
     for s in l:
-        key = s.split('/')[0]
-        val = s.split('/')[1]
-        temp.append(key)
-        dict_dfs_id_codes_test[key] = val
-        if key in d:
-            d[key] += 1
+        temp.append(s)
+        if s in d:
+            d[s] += 1
         else:
-            d[key] = 1
+            d[s] = 1
     graph_cnt_lst_test.append(d)
     all_ctree_codes_test.append(temp)
 
