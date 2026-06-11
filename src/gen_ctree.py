@@ -18,6 +18,7 @@ import gnn
 import utils
 from pygcanl import canonical
 
+N_HOPS = 3
 
 parser = ArgumentParser(description='Process some parameters.')
 parser.add_argument('--name', type=str, required=True,
@@ -72,17 +73,20 @@ start_time = process_time()
 
 processed_dataset = utils.preprocess_dataset(
     [dataset[i] for i in train_indices])
-list_of_dfs_codes = canonical(processed_dataset, 3)
+list_of_dfs_codes = canonical(processed_dataset, N_HOPS)
 
 all_ctree_codes = []
 graph_cnt_lst = []
 unique_ctree_codes = []
+ctree_node_sources = {}
 
-for l in list_of_dfs_codes:
+for graph_idx, codes in enumerate(list_of_dfs_codes):
+    dataset_idx = train_indices[graph_idx]
     temp = []
     d = {}
-    for s in l:
+    for node_idx, s in enumerate(codes):
         temp.append(s)
+        ctree_node_sources.setdefault(s, []).append((dataset_idx, node_idx))
         if s not in unique_ctree_codes:
             unique_ctree_codes.append(s)
         if s in d:
@@ -94,6 +98,8 @@ for l in list_of_dfs_codes:
 
 with open(f"{FOLDER}/unique_ctree_codes.pkl", "wb") as file:
     dump(unique_ctree_codes, file)
+with open(f"{FOLDER}/ctree_node_sources.pkl", "wb") as file:
+    dump(ctree_node_sources, file)
 
 cnt_ind_vec = []
 for g_dict in graph_cnt_lst:
@@ -113,7 +119,7 @@ with open(f"{FOLDER}/cnt_ind_vec.pkl", "wb") as file:
 # * ----- Indicator vectors of validation graphs
 processed_dataset_val = utils.preprocess_dataset(
     [dataset[i] for i in val_indices])
-list_of_dfs_codes_val = canonical(processed_dataset_val, 3)
+list_of_dfs_codes_val = canonical(processed_dataset_val, N_HOPS)
 
 all_ctree_codes_val = []
 graph_cnt_lst_val = []
@@ -148,7 +154,7 @@ with open(f"{FOLDER}/cnt_ind_vec_val.pkl", "wb") as file:
 # * ----- Indicator vectors of test graphs
 processed_dataset_test = utils.preprocess_dataset(
     [dataset[i] for i in test_indices])
-list_of_dfs_codes_test = canonical(processed_dataset_test, 3)
+list_of_dfs_codes_test = canonical(processed_dataset_test, N_HOPS)
 
 all_ctree_codes_test = []
 graph_cnt_lst_test = []

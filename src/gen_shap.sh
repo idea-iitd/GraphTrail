@@ -6,9 +6,11 @@ sizes=(0.05 0.25 0.5 0.75 1.0)
 
 # Use variables like this to run one at a time.
 datasets=("MUTAG")
-archs=("GCN")
+archs=("GIN")
 pools=("add")
 sizes=(1.0)
+seeds=(45)
+# seeds=(45 357 796)
 
 for dataset in "${datasets[@]}"; do
     for arch in "${archs[@]}"; do
@@ -18,8 +20,6 @@ for dataset in "${datasets[@]}"; do
                 if [[ $dataset == "NCI1" ]]
                 then
                     seeds=(45 1225 1983)
-                else
-                    seeds=(45 357 796)
                 fi
 
                 for seed in "${seeds[@]}"; do
@@ -38,9 +38,6 @@ for dataset in "${datasets[@]}"; do
 
                     echo $gen_shap
                     { time $gen_shap ; } > $log_1 2> $log_2
-
-                    # echo $gen_shap_eig
-                    # { time $gen_shap_eig ; } > $log_1 2> $log_2
                 done
             done
         done

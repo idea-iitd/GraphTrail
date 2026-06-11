@@ -266,6 +266,23 @@ print("Simplified equation:", equation)
 print("Train accuracy:", train_acc)
 print("Test accuracy:", test_acc)
 
+# Metadata for gen_subgraphs.py: map each xN in the formula to its ctree.
+# xN indexes the top-k Shapley columns (shap_indices[-k:][N]), which in turn
+# index into unique_ctree_codes.pkl.
+formula_var_indices = sorted({
+    int(str(v)[1:])
+    for v in utils.getVariables(equation)
+    if str(v).startswith("x")
+})
+formula_meta = {
+    "best_index": best_index,
+    "equation": str(equation),
+    "formula_var_indices": formula_var_indices,
+    "k": args.k,
+    "shap_indices": indices.tolist(),
+}
+with open(f"{FOLDER}/formula_meta_sample{args.sample}.pkl", "wb") as file:
+    dump(formula_meta, file)
 
 # * ----- Save stuff to disk
 # Save equations

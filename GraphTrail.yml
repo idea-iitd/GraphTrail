@@ -198,8 +198,8 @@ dependencies:
   - nettle=3.7.3=hbbd107a_1
   - networkx=3.4.2=py310h06a4308_0
   - numba=0.64.0=py310h225f558_0
-  - numpy=2.2.5=py310h2470af2_0
-  - numpy-base=2.2.5=py310h06ae042_0
+  - numpy=1.26.4=py310h5f9d8c6_0
+  - numpy-base=1.26.4=py310hb5e798b_0
   - openh264=2.1.1=h4ff587b_0
   - openjpeg=2.5.4=h4e0627c_1
   - openldap=2.6.12=h007892f_1
