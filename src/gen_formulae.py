@@ -5,14 +5,10 @@ import warnings
 from argparse import ArgumentParser
 from os import makedirs
 from pickle import dump, load
-from shutil import rmtree
 from time import process_time
 
-import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import sympy
 import torch
 import torch_geometric as pyg
@@ -21,8 +17,6 @@ from torch_geometric.loader import DataLoader
 import gnn
 import utils
 
-sns.set()
-sns.set_style("white")
 warnings.filterwarnings('ignore')
 
 parser = ArgumentParser(description='Process some parameters.')
@@ -44,11 +38,7 @@ args = parser.parse_args()
 
 torch.manual_seed(args.seed)
 FOLDER = f"../data/{args.name}/{args.arch}/{args.pool}/{args.size}/{args.seed}/"
-PLOT_FOLDER = f"../plots/{args.name}/{args.arch}/{args.pool}/{args.size}/{args.seed}/sample{args.sample}"
 makedirs(FOLDER, exist_ok=True)
-
-rmtree(PLOT_FOLDER, ignore_errors=True)
-makedirs(PLOT_FOLDER, exist_ok=True)
 
 
 # * ----- Data
@@ -84,11 +74,6 @@ if args.sample != 1.0:
     ORIG = FOLDER
     # replace args.size with args.sample
     FOLDER = f"../data/{args.name}/{args.arch}/{args.pool}/{args.sample}/{args.seed}/"
-
-with open(f"{FOLDER}/dict_dfs_id_codes.pkl", "rb") as file:
-    dict_dfs_id_codes = load(file)
-with open(f"{FOLDER}/unique_ctree_codes.pkl", "rb") as file:
-    unique_ctree_codes = load(file)
 
 with open(f"{FOLDER}shap_values.pkl", "rb") as file:
     shap_values = load(file)
@@ -209,8 +194,6 @@ def cal_pysr_acc(X, Y, index=None):
 pysrmodel.fit(x_train_bin, train_pred)
 print(pysrmodel)
 
-selected_ctrees = pysrmodel.selection_mask_
-
 df_equations = pysrmodel.equations.drop(["sympy_format", "lambda_format"], axis=1)
 # Add a column for accuracy.
 df_equations["acc"] = 1 - df_equations["loss"]
@@ -283,6 +266,23 @@ print("Simplified equation:", equation)
 print("Train accuracy:", train_acc)
 print("Test accuracy:", test_acc)
 
+# Metadata for gen_subgraphs.py: map each xN in the formula to its ctree.
+# xN indexes the top-k Shapley columns (shap_indices[-k:][N]), which in turn
+# index into unique_ctree_codes.pkl.
+formula_var_indices = sorted({
+    int(str(v)[1:])
+    for v in utils.getVariables(equation)
+    if str(v).startswith("x")
+})
+formula_meta = {
+    "best_index": best_index,
+    "equation": str(equation),
+    "formula_var_indices": formula_var_indices,
+    "k": args.k,
+    "shap_indices": indices.tolist(),
+}
+with open(f"{FOLDER}/formula_meta_sample{args.sample}.pkl", "wb") as file:
+    dump(formula_meta, file)
 
 # * ----- Save stuff to disk
 # Save equations
@@ -303,140 +303,3 @@ del pysrmodel
 
 end_time = process_time()
 print(f"[TIME] gen_formulae: {end_time - start_time} s.ms")
-
-
-# * ----- Visualize the computation trees present in the forumulae.
-variables_eq = utils.getVariables(equation)
-
-node_mapping = None
-if args.name == "MUTAG":
-    node_mapping = {0: "C", 1: "N", 2: "O", 3: "F", 4: "I", 5: "Cl", 6: "Br"}
-elif args.name == "Mutagenicity":
-    node_mapping = {0: 'C', 1: 'O', 2: 'Cl', 3: 'H', 4: 'N', 5: 'F', 6: 'Br',
-                    7: 'S', 8: 'P', 9: 'I', 10: 'Na', 11: 'K', 12: 'Li', 13: 'Ca'}
-
-FIGSIZE = (8, 6)
-NODESIZE = ...
-EDGE_WIDTH = 1.75
-NODE_COLOR = "#FD5D02"
-colors = ['green', 'black', 'blue', 'red'] # aromatic, single, double, triple
-
-# for v in variables_eq:
-#     if str(v)[0] != "x":
-#         continue
-#     v = int(str(v)[1:])
-for v in selected_ctrees:
-    code_dfs = unique_ctree_codes[indices[- args.k:][v]]
-    code_id = dict_dfs_id_codes[code_dfs]
-
-    # * ----- Ctree using node attributes
-    if args.name == 'BAMultiShapesDataset':
-        ctree = utils.graph_from_dfs_code(code_id)
-    else:
-        ctree = utils.graph_from_dfs_code(code_dfs)
-    ctree = ctree.reverse()
-
-    edge_colors = None
-    if args.name in ["MUTAG", "Mutagenicity"]:
-        edge_colors = [colors[ctree.edges[edge]['attr']] for edge in ctree.edges()]
-
-    labeldict = {}
-    for i in range(len(ctree.nodes)):
-        if args.name in ["MUTAG", "Mutagenicity"]:
-            labeldict[i] = node_mapping[ctree.nodes[i]['attr']]
-        elif args.name == "NCI1":
-            labeldict[i] = ctree.nodes[i]['attr']
-
-    plt.figure(figsize=FIGSIZE)
-    plt.title(v)
-    if args.name == "NCI1":
-        nx.draw_planar(
-            ctree,
-            labels=labeldict,
-            with_labels=True,
-            node_color=NODE_COLOR,
-            width=EDGE_WIDTH
-        )
-    elif args.name in TU_DATASETS:
-        nx.draw_planar(
-            ctree,
-            labels=labeldict,
-            with_labels=True,
-            node_color=NODE_COLOR,
-            width=EDGE_WIDTH,
-            edge_color=edge_colors,
-        )
-    else:
-        nx.draw_planar(ctree, node_color=NODE_COLOR, width=EDGE_WIDTH)
-
-    plt.savefig(f"{PLOT_FOLDER}/{v}_ctree.png")
-
-
-    # * ----- Ctree using node ids
-    ctree_id = utils.graph_from_dfs_code(code_id)
-    ctree_id = ctree_id.reverse()
-
-    labeldict = None
-    if args.name in TU_DATASETS:
-        labeldict = {}
-        for i in range(len(ctree_id.nodes)):
-            labeldict[i] = ctree_id.nodes[i]['attr']
-
-    plt.figure(figsize=FIGSIZE)
-    plt.title(v)
-    if args.name == "NCI1":
-        nx.draw_planar(
-            ctree_id,
-            labels=labeldict,
-            with_labels=True,
-            node_color=NODE_COLOR,
-            width=EDGE_WIDTH,
-        )
-    elif args.name in TU_DATASETS:
-        nx.draw_planar(
-            ctree_id,
-            labels=labeldict,
-            with_labels=True,
-            node_color=NODE_COLOR,
-            width=EDGE_WIDTH,
-            edge_color=edge_colors,
-        )
-    else:
-        nx.draw_planar(ctree_id, node_color=NODE_COLOR, width=EDGE_WIDTH)
-
-    plt.savefig(f"{PLOT_FOLDER}/{v}_ctree_id.png")
-
-
-    # * ----- Ctree to subgraph
-    G = utils.dfs(ctree=ctree, ctree_id=ctree_id, node_mapping=node_mapping)
-    edge_colors = [colors[G.edges[edge]['attr']] for edge in G.edges()]
-
-    labeldict = None
-    if args.name in TU_DATASETS:
-        labeldict = {}
-        for i in G.nodes:
-            labeldict[i] = G.nodes[i]['attr']
-
-    plt.figure(figsize=FIGSIZE)
-    plt.title(v)
-    if args.name == "NCI1":
-        nx.draw_kamada_kawai(
-            G,
-            labels=labeldict,
-            with_labels=True,
-            node_color=NODE_COLOR,
-            width=EDGE_WIDTH,
-        )
-    elif args.name in TU_DATASETS:
-        nx.draw_kamada_kawai(
-            G,
-            labels=labeldict,
-            with_labels=True,
-            node_color=NODE_COLOR,
-            width=EDGE_WIDTH,
-            edge_color=edge_colors,
-        )
-    else:
-        nx.draw_kamada_kawai(G, node_color=NODE_COLOR, width=EDGE_WIDTH)
-
-    plt.savefig(f"{PLOT_FOLDER}/{v}_structure.png")
