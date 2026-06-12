@@ -25,6 +25,9 @@ parser.add_argument('--size', type=float, default=1.0,
                     help='Fraction of training data to be used.')
 parser.add_argument('--seed', type=int, default=45,
                     help='Seed used for train-val-test split.')
+parser.add_argument('--device', type=str, default=None,
+                    help='Device to train on (e.g. cuda, cuda:0, cpu). '
+                         'Defaults to cuda when available.')
 args = parser.parse_args()
 
 
@@ -50,12 +53,27 @@ train_dataset = dataset[train_indices]
 test_dataset = dataset[test_indices]
 val_dataset = dataset[val_indices]
 
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=False)
-val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
-test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+if args.device is None:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+else:
+    device = torch.device(args.device)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError(f"CUDA device requested but not available: {args.device}")
+print(f"Training on {device}")
+if device.type == "cuda":
+    torch.backends.cudnn.benchmark = True
+
+pin_memory = device.type == "cuda"
+train_loader = DataLoader(
+    train_dataset, batch_size=64, shuffle=False, pin_memory=pin_memory)
+val_loader = DataLoader(
+    val_dataset, batch_size=64, shuffle=False, pin_memory=pin_memory)
+test_loader = DataLoader(
+    test_dataset, batch_size=64, shuffle=False, pin_memory=pin_memory)
 
 
 # * ----- Model
+
 if args.arch == "EIG":
     if args.name == "MUTAG":
         model = gnn_eigsearch.GIN(num_features=7, num_classes=2, num_layers=3, hidden=128)
@@ -70,7 +88,6 @@ else:
     model = eval(f"gnn.{args.arch.upper()}_{args.name}(pooling='{args.pool}')")
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 criterion = torch.nn.CrossEntropyLoss()
-device = "cpu"
 model = model.to(device)
 
 
@@ -200,7 +217,7 @@ model.load_state_dict(weights_best)
 torch.save(model.state_dict(), f"{FOLDER}/model.pt")
 
 weights_best = f"{FOLDER}/model.pt"
-model.load_state_dict(torch.load(weights_best))
+model.load_state_dict(torch.load(weights_best, map_location=device))
 model.eval()
 
 
